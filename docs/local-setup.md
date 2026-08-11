@@ -123,12 +123,27 @@ print('TRANSPILER_IMPORT_OK')"
 - 임시 보정: `~/.zshrc`에서 깨끗한 값으로 `export HF_TOKEN=...` 재정의 (적용해둠)
 - 근본 해결: `/etc/environment`에서 해당 줄의 인라인 주석을 제거 (sudo 필요)
 
-베이스 VLM 캐시 (HF_HOME을 모델 파티션으로):
+### 삽질 2: Artifactory 미러는 대용량(LFS) 파일에서 타임아웃
+
+Artifactory 미러 경유 다운로드는 **작은 파일(config, tokenizer 등)은 성공하지만
+safetensors 샤드(각 ~5GB)는 매번 ~22분 후 실패**합니다 (미러가 업스트림 캐싱 중
+게이트웨이 타임아웃으로 추정, 30회 재시도해도 동일). `huggingface.co` 직접 접근은
+프록시에서 허용되지만 기본 CDN(`us.aws.cdn.hf.co`)은 행이 걸립니다.
+
+**해결: Xet 전송 백엔드** — Xet의 CAS 서버(`cas-server.xethub.hf.co`,
+`transfer.xethub.hf.co`)는 프록시를 통과합니다. `hf_xet`을 설치하고 미러를 우회하면
+대용량 파일도 정상 다운로드됩니다:
 
 ```bash
-export HF_HOME=/mnt/models/huggingface   # ~/.zshrc에 추가해둠
+pip install hf_xet
+export HF_ENDPOINT=https://huggingface.co   # Artifactory 미러 우회 (이 세션에서만)
+export HF_TOKEN=                            # Artifactory 토큰을 hf.co에 보내지 않도록 비움
+export HF_HOME=/mnt/models/huggingface      # ~/.zshrc에 추가해둠
 python -c "from huggingface_hub import snapshot_download; snapshot_download('llava-hf/llama3-llava-next-8b-hf')"
 ```
+
+> 평상시(작은 모델/파일)는 사내 미러를 그대로 쓰고, 대용량 모델을 받을 때만
+> 위처럼 `HF_ENDPOINT`를 일시적으로 덮어쓰는 것을 권장합니다.
 
 ### Google Drive: 프록시에서 차단 🚫
 
